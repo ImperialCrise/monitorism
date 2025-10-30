@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ethereum-optimism/monitorism/op-monitorism/errors"
 	"github.com/ethereum-optimism/monitorism/op-monitorism/faultproof_withdrawals/validator"
 	"github.com/ethereum-optimism/optimism/op-service/metrics"
 
@@ -49,34 +50,34 @@ func NewMonitor(ctx context.Context, log log.Logger, m metrics.Factory, cfg CLIC
 
 	l1GethClient, err := ethclient.Dial(cfg.L1GethURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial l1: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeNetwork, "failed to dial l1").WithDetail("url", cfg.L1GethURL)
 	}
 	l2OpGethClient, err := ethclient.Dial(cfg.L2OpGethURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial l2: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeNetwork, "failed to dial l2 geth").WithDetail("url", cfg.L2OpGethURL)
 	}
 	l2OpNodeClient, err := ethclient.Dial(cfg.L2OpNodeURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial l2: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeNetwork, "failed to dial l2 node").WithDetail("url", cfg.L2OpNodeURL)
 	}
 
 	withdrawalValidator, err := validator.NewWithdrawalValidator(ctx, l1GethClient, l2OpGethClient, l2OpNodeClient, cfg.OptimismPortalAddress)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create withdrawal validator: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to create withdrawal validator")
 	}
 
 	latestL1Height, err := l1GethClient.BlockNumber(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query latest block number: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeNetwork, "failed to query latest block number")
 	}
 
 	l1ChainID, err := l1GethClient.ChainID(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get l1 chain id: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeNetwork, "failed to get l1 chain id")
 	}
 	l2ChainID, err := l2OpGethClient.ChainID(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get l2 chain id: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeNetwork, "failed to get l2 chain id")
 	}
 
 	metrics := NewMetrics(m)
@@ -116,7 +117,7 @@ func NewMonitor(ctx context.Context, log log.Logger, m metrics.Factory, cfg CLIC
 		latestL1HeightBigInt := new(big.Int).SetUint64(latestL1Height)
 		startingL1BlockHeightBigInt, err := ret.getBlockAtApproximateTimeBinarySearch(ctx, l1GethClient, latestL1HeightBigInt, big.NewInt(int64(hoursInThePastToStartFrom)))
 		if err != nil {
-			return nil, fmt.Errorf("failed to get block at approximate time: %w", err)
+			return nil, errors.Wrap(err, errors.ErrCodeBlockchain, "failed to get block at approximate time")
 		}
 		startingL1BlockHeight = startingL1BlockHeightBigInt.Uint64()
 
@@ -126,7 +127,7 @@ func NewMonitor(ctx context.Context, log log.Logger, m metrics.Factory, cfg CLIC
 
 	state, err := NewState(log, startingL1BlockHeight, latestL1Height, ret.withdrawalValidator.GetLatestL2Height())
 	if err != nil {
-		return nil, fmt.Errorf("failed to create state: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeInternal, "failed to create state")
 	}
 	ret.state = *state
 
@@ -161,7 +162,7 @@ func (m *Monitor) getBlockAtApproximateTimeBinarySearch(ctx context.Context, cli
 		//interrupt in case of context cancellation
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("context cancelled")
+			return nil, errors.Wrap(ctx.Err(), errors.ErrCodeTimeout, "context cancelled")
 		default:
 		}
 

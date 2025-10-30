@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ethereum-optimism/monitorism/op-monitorism/errors"
 	"github.com/ethereum-optimism/monitorism/op-monitorism/multisig/bindings"
 	"github.com/ethereum-optimism/optimism/op-bindings/predeploys"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
@@ -45,31 +46,31 @@ func NewMonitor(ctx context.Context, log log.Logger, m metrics.Factory, cfg CLIC
 
 	l1Client, err := ethclient.Dial(cfg.L1NodeURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial l1: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeNetwork, "failed to dial l1").WithDetail("url", cfg.L1NodeURL)
 	}
 	l2Client, err := ethclient.Dial(cfg.L2NodeURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial l2: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeNetwork, "failed to dial l2").WithDetail("url", cfg.L2NodeURL)
 	}
 
 	optimismPortal, err := bindings.NewOptimismPortalCaller(cfg.OptimismPortalAddress, l1Client)
 	if err != nil {
-		return nil, fmt.Errorf("failed to bind to the OptimismPortal: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeBlockchain, "failed to bind to the OptimismPortal").WithDetail("address", cfg.OptimismPortalAddress.String())
 	}
 
 	l2OOAddress, err := optimismPortal.L2ORACLE(&bind.CallOpts{Context: ctx})
 	if err != nil {
-		return nil, fmt.Errorf("failed to query L2OO address: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeBlockchain, "failed to query L2OO address")
 	}
 	log.Info("configured L2OutputOracle", "address", l2OOAddress.String())
 
 	l2OO, err := bindings.NewL2OutputOracleCaller(l2OOAddress, l1Client)
 	if err != nil {
-		return nil, fmt.Errorf("failed to bind to the L2OutputOracle: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeBlockchain, "failed to bind to the L2OutputOracle").WithDetail("address", l2OOAddress.String())
 	}
 	faultProofWindow, err := l2OO.FinalizationPeriodSeconds(&bind.CallOpts{Context: ctx})
 	if err != nil {
-		return nil, fmt.Errorf("failed to query for finalization window: %w", err)
+		return nil, errors.Wrap(err, errors.ErrCodeBlockchain, "failed to query for finalization window")
 	}
 
 	monitor := &Monitor{
@@ -103,7 +104,7 @@ func NewMonitor(ctx context.Context, log log.Logger, m metrics.Factory, cfg CLIC
 		firstUnfinalizedIndex, err := monitor.findFirstUnfinalizedOutputIndex(ctx, monitor.faultProofWindow)
 		if err != nil {
 			monitor.nodeConnectionFailures.WithLabelValues("l1", "firstUnfinalizedIndex").Inc()
-			return nil, fmt.Errorf("failed to find first unfinalized output index: %w", err)
+			return nil, errors.Wrap(err, errors.ErrCodeBlockchain, "failed to find first unfinalized output index")
 		}
 		startingOutputIndex = int64(firstUnfinalizedIndex)
 	}
@@ -203,11 +204,11 @@ func (m *Monitor) findFirstUnfinalizedOutputIndex(ctx context.Context, finalizat
 
 	latestBlock, err := m.l2Client.BlockByNumber(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("failed to query latest block: %w", err)
+		return 0, errors.Wrap(err, errors.ErrCodeNetwork, "failed to query latest block")
 	}
 	totalOutputsBig, err := m.l2OO.NextOutputIndex(callOpts)
 	if err != nil {
-		return 0, fmt.Errorf("failed to query next output index: %w", err)
+		return 0, errors.Wrap(err, errors.ErrCodeBlockchain, "failed to query next output index")
 	}
 
 	// Binary search the list of posted outputs
@@ -218,7 +219,7 @@ func (m *Monitor) findFirstUnfinalizedOutputIndex(ctx context.Context, finalizat
 		mid := (low + high) / 2
 		output, err := m.l2OO.GetL2Output(callOpts, big.NewInt(int64(mid)))
 		if err != nil {
-			return 0, fmt.Errorf("failed to query output index %d: %w", mid, err)
+			return 0, errors.Wrap(err, errors.ErrCodeBlockchain, "failed to query output index").WithDetail("index", mid)
 		}
 
 		if output.Timestamp.Uint64()+finalizationWindow < latestBlock.Time() {

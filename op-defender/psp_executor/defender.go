@@ -5,7 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
+	sysErrors "errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum-optimism/monitorism/op-monitorism/errors"
 	"github.com/ethereum-optimism/optimism/op-bindings/bindings"
 	"github.com/ethereum-optimism/optimism/op-service/metrics"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -534,7 +535,7 @@ func (d *Defender) ExecutePSPOnchain(ctx context.Context, safe_address common.Ad
 		return common.Hash{}, err
 	}
 	if pause_before_transaction {
-		return common.Hash{}, errors.New("the SuperChainConfig is already paused")
+		return common.Hash{}, sysErrors.New("the SuperChainConfig is already paused")
 	}
 
 	d.log.Info("[Before Transaction] status of the pause()", "pause", pause_before_transaction)
